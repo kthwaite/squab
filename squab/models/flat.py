@@ -1,9 +1,12 @@
 """
 """
 
+from typing import Type
+
 from lion_pytorch import Lion
 from pytorch_lightning import LightningModule
-from torch.nn import GELU, CrossEntropyLoss, Flatten, Linear, Sequential
+from torch.nn import (GELU, CrossEntropyLoss, Flatten, Linear, Module,
+                      Sequential)
 from torchmetrics import Accuracy
 
 from ..layers.linear import InverseBottleneck
@@ -21,11 +24,16 @@ class FlatNet(LightningModule):
         depth: int = 6,
         mixup: bool = False,
         lr: float = 5e-5,
+        act: Type[Module] = GELU,
+        expansion_factor: int = 4,
+        label_smoothing: float = 0.3,
+        mixup_alpha: float = 0.8,
     ):
         super().__init__()
         self.save_hyperparameters()
         self.mixup = mixup
         self.lr = lr
+        self.mixup_alpha = mixup_alpha
         self.layers = Sequential(
             Flatten(1, -1),
             Linear(image_size * image_size * channels, hidden_dim),
@@ -34,14 +42,14 @@ class FlatNet(LightningModule):
             self.layers.append(
                 InverseBottleneck(
                     hidden_dim,
-                    expansion_factor=4,
+                    expansion_factor=expansion_factor,
                     dropout=dropout,
-                    act=GELU,
+                    act=act,
                     depth=2,
                 )
             )
         self.layers.append(Linear(hidden_dim, num_classes))
-        self.crit = CrossEntropyLoss(label_smoothing=0.3)
+        self.crit = CrossEntropyLoss(label_smoothing=label_smoothing)
         self.test_accuracy = Accuracy(task="multiclass", num_classes=10)
 
     def forward(self, x):
@@ -50,7 +58,7 @@ class FlatNet(LightningModule):
     def training_step(self, batch, batch_idx):
         x, y = batch
         if mixup:
-            x, ya, yb, lam = mixup(x, y, alpha=0.8)
+            x, ya, yb, lam = mixup(x, y, alpha=self.mixup_alpha)
             yh = self(x)
             loss = mixup_loss(self.crit, yh, ya, yb, lam)
         else:
