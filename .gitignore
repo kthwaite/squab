@@ -26,3 +26,5 @@ MANIFEST
 .venv/
 data/
 .ipynb_checkpoints/
+.pdm-python
+lightning_logs/
