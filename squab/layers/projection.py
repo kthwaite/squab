@@ -6,8 +6,10 @@ from typing import Any, List, Optional
 
 import numpy as np
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 from torch.nn import Linear, Module
+
+from .skipgram_convolution import SkipgramConvolution
 
 
 class TritProjector:
@@ -42,8 +44,8 @@ class TritProjector:
             self._d[token] = v
             return v
 
-    def __call__(self, tokens: List[List[str]]) -> Tensor:
-        return torch.from_numpy(self._vmap_project(tokens))
+    def __call__(self, tokens: List[List[str]]) -> np.ndarray:
+        return self._vmap_project(tokens)
 
 
 class TritProjectionEmbedding(Module):
@@ -58,8 +60,21 @@ class TritProjectionEmbedding(Module):
         """
         super().__init__()
         self.projector = TritProjector()
-        self.embedding = Linear(trit_dim, embedding_dim)
+        self.embedding = Linear(trit_dim, embedding_dim, bias=False)
 
     def forward(self, x: List[List[str]]) -> Tensor:
-        p = self.projector(x)
+        p = torch.from_numpy(self.projector(x)).to("cuda")
         return self.embedding(p)
+
+
+class ProjAttention(Module):
+    def __init__(self, in_channels, out_channels, embedding_dim, mask):
+        super().__init__()
+        self.feat = SkipgramConvolution(in_channels, out_channels, embedding_dim, mask)
+        self.attn = SkipgramConvolution(in_channels, out_channels, embedding_dim, mask)
+        self.act = nn.Softmax(dim=-1)
+
+    def forward(self, x):
+        feat = self.feat(x).squeeze(dim=-1)
+        attn = self.act(self.attn(x).squeeze(dim=-1))
+        return torch.sum(attn * feat, dim=-1)
