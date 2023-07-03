@@ -4,8 +4,9 @@
 from typing import Type
 
 import numpy as np
+from torch import Tensor
 from torch.nn import (GELU, GLU, Dropout, LayerNorm, Linear, Module, ReLU,
-                      Sequential)
+                      Sequential, Softmax)
 from torch.nn.utils import weight_norm
 
 from .residual import SequentialResidual
@@ -92,3 +93,64 @@ class GatedLinearStack(Module):
 
     def forward(self, x):
         return self.layers(x)
+
+
+def MixerBlock(in_features: int, hidden_features: int):
+    return Sequential(
+        Linear(in_features, hidden_features),
+        GELU(),
+        Linear(hidden_features, in_features),
+    )
+
+
+class MixerTranspose(Module):
+    def forward(self, x: Tensor) -> Tensor:
+        return x.transpose(-1, -2)
+
+
+class MixerLayer(Module):
+    def __init__(
+        self,
+        seq_len: int,
+        hidden_dim: int,
+        channel_dim: int,
+        sequence_dim: int,
+    ):
+        super().__init__()
+        self.layers = Sequential(
+            SequentialResidual(
+                LayerNorm(hidden_dim),
+                MixerTranspose(),
+                MixerBlock(seq_len, sequence_dim),
+                MixerTranspose(),
+            ),
+            SequentialResidual(
+                LayerNorm(hidden_dim),
+                MixerBlock(hidden_dim, channel_dim),
+            ),
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.layers(x)
+
+
+class MixerAttention(Module):
+    def __init__(
+        self,
+        seq_len: int,
+        hidden_dim: int,
+        out_features: int,
+        channel_dim: int,
+        sequence_dim: int,
+    ):
+        super().__init__()
+        self.feat = Linear(hidden_dim, out_features)
+        self.attn = Linear(hidden_dim, out_features)
+        self.mix = MixerLayer(seq_len, hidden_dim, channel_dim, sequence_dim)
+        self.act = Softmax()
+
+    def forward(self, x: Tensor) -> Tensor:
+        xh = self.mix(x)
+        feat = self.feat(xh).squeeze(-1)
+        attn = self.act(self.attn(xh).squeeze(-1))
+        return (attn * feat).sum(-1)
