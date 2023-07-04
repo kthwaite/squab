@@ -2,8 +2,9 @@
 """
 
 import hashlib
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional, Tuple
 
+import farmhash
 import numpy as np
 import torch
 from torch import Tensor, nn
@@ -153,7 +154,7 @@ class TokenFingerprinter:
         self.ngrams = ngrams
         self.hash = MinHash(dim, **kwargs)
         self._filter = np.eye(feature_dim, dtype=np.float32)
-        self._ngrams = np.zeros((32, self.hash.dim), dtype=np.int64)
+        self._ngrams = np.zeros((64, self.hash.dim), dtype=np.int64)
 
     def filter(self, value: np.ndarray):
         return self._filter[value & (self.feature_dim - 1)].sum(axis=-2)
@@ -175,6 +176,10 @@ class TokenFingerprinter:
             )
             self.hash.clear()
             return value
+
+        if len(token) > 64:
+            token = token[:64]
+
         tok_len = len(token) - self.ngrams + 1
         for index in range(tok_len):
             self.hash.update(token[index : index + self.ngrams])
